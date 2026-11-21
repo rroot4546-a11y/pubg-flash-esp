@@ -80,6 +80,10 @@ public final class ProbeActivity extends Activity {
         log.append(text + "\n");
     }
 
+    static void lineStatic(String text) {
+        android.util.Log.i("probe", text);
+    }
+
     private void failure(String what, Throwable t) {
         StringWriter sw = new StringWriter();
         t.printStackTrace(new PrintWriter(sw));
@@ -155,6 +159,11 @@ public final class ProbeActivity extends Activity {
 
     private void requestCapture() {
         try {
+            Intent fgs = new Intent(this, ProbeFgs.class);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(fgs);
+            else startService(fgs);
+            line("mediaProjection FGS started");
+
             MediaProjectionManager mpm =
                     (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
             startActivityForResult(mpm.createScreenCaptureIntent(), REQ_CAPTURE);
