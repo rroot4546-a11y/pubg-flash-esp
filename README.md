@@ -43,6 +43,17 @@ the `v*` release.
 
 Nothing is written to the game. The detector sees the same pixels the player sees.
 
+## If the app crashes
+
+v2.0.2 records every crash and engine error on the device:
+
+1. Reopen the app — the last crash stack trace opens automatically.
+2. Otherwise tap **VIEW ERRORS** to see the full crash and engine error text.
+3. Tap **COPY** in that dialog and paste the text when reporting the failure.
+4. **CLEAR ERRORS** wipes the stored logs.
+
+`last error` and `last crash` are also shown on the main status panel.
+
 ## Install and run — root memory mode
 
 1. Device must be rooted with Magisk; `su` must grant the app root silently.

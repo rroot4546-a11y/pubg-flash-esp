@@ -31,7 +31,13 @@ public final class EspOverlayService extends Service {
     public void onCreate() {
         super.onCreate();
         windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
-        startForeground(1, buildNotification());
+        try {
+            startForeground(1, buildNotification());
+        } catch (Throwable t) {
+            String message = "foreground service failed: " + CrashLog.describe(t);
+            CrashLog.recordError(this, message + "\n" + CrashLog.stackTrace(t));
+            ui.post(() -> Toast.makeText(this, message, Toast.LENGTH_LONG).show());
+        }
     }
 
     @Override

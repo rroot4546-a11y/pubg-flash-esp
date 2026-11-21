@@ -73,12 +73,23 @@ public final class VisionOverlayService extends Service {
     public void onCreate() {
         super.onCreate();
         windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
-        Notification notification = buildNotification();
-        if (Build.VERSION.SDK_INT >= 34) {
-            startForeground(NOTIFICATION_ID, notification,
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
-        } else {
-            startForeground(NOTIFICATION_ID, notification);
+    }
+
+    private boolean enterForeground() {
+        try {
+            Notification notification = buildNotification();
+            if (Build.VERSION.SDK_INT >= 34) {
+                startForeground(NOTIFICATION_ID, notification,
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
+            } else {
+                startForeground(NOTIFICATION_ID, notification);
+            }
+            return true;
+        } catch (Throwable t) {
+            String message = "foreground service failed: " + CrashLog.describe(t);
+            CrashLog.recordError(this, message);
+            ui.post(() -> Toast.makeText(this, message, Toast.LENGTH_LONG).show());
+            return false;
         }
     }
 
@@ -97,6 +108,10 @@ public final class VisionOverlayService extends Service {
             stopSelf();
             return START_NOT_STICKY;
         }
+        if (!enterForeground()) {
+            stopSelf();
+            return START_NOT_STICKY;
+        }
         running = true;
 
         try {
@@ -111,8 +126,10 @@ public final class VisionOverlayService extends Service {
             if (projection == null) throw new IllegalStateException("MediaProjection is null");
             startCapture();
             ui.post(this::addOverlay);
-        } catch (RuntimeException e) {
-            Toast.makeText(this, "vision engine failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        } catch (Throwable t) {
+            String message = "vision engine failed: " + CrashLog.describe(t);
+            CrashLog.recordError(this, message + "\n" + CrashLog.stackTrace(t));
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show();
             stopSelf();
         }
         return START_STICKY;
@@ -172,7 +189,8 @@ public final class VisionOverlayService extends Service {
                             busy.set(false);
                             image.close();
                         });
-            } catch (RuntimeException e) {
+            } catch (Throwable t) {
+                CrashLog.recordError(this, "vision frame failed: " + CrashLog.describe(t));
                 busy.set(false);
                 image.close();
             }

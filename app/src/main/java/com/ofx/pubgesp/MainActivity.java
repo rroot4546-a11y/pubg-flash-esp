@@ -3,6 +3,8 @@ package com.ofx.pubgesp;
 import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -121,11 +123,36 @@ public final class MainActivity extends Activity {
         refresh.setOnClickListener(v -> updateStatus());
         root.addView(refresh);
 
+        Button errors = new Button(this);
+        errors.setText("VIEW ERRORS");
+        errors.setOnClickListener(v -> {
+            String crash = CrashLog.lastCrash(this);
+            String error = CrashLog.lastError(this);
+            String text = (crash == null ? "no crashes recorded" : "CRASH:\n" + crash)
+                    + "\n\nENGINE:\n" + (error == null ? "no engine errors" : error);
+            showText("Diagnostics", text);
+        });
+        root.addView(errors);
+
+        Button clearErrors = new Button(this);
+        clearErrors.setText("CLEAR ERRORS");
+        clearErrors.setOnClickListener(v -> {
+            CrashLog.clear(this);
+            Toast.makeText(this, "logs cleared", Toast.LENGTH_SHORT).show();
+            updateStatus();
+        });
+        root.addView(clearErrors);
+
         ScrollView scroll = new ScrollView(this);
         scroll.addView(root, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         setContentView(scroll);
         updateStatus();
+
+        String startupCrash = CrashLog.lastCrash(this);
+        if (startupCrash != null) {
+            showText("App crashed — diagnostics", startupCrash);
+        }
 
         if (Build.VERSION.SDK_INT >= 33
                 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
@@ -178,11 +205,38 @@ public final class MainActivity extends Activity {
         boolean overlay = android.provider.Settings.canDrawOverlays(this);
         String engine = engineSpinner != null && engineSpinner.getSelectedItemPosition() == 0
                 ? "vision (no root)" : "memory (root)";
+        String error = CrashLog.lastError(this);
+        String crash = CrashLog.lastCrash(this);
         status.setText("engine: " + engine
                 + "\nroot: " + (root ? "YES" : "NO")
                 + "\noverlay permission: " + (overlay ? "YES" : "NO")
                 + "\nvision: MediaProjection + on-device person detector"
-                + "\nmemory: /data/local/tmp/ofx_esp.sock");
+                + "\nmemory: /data/local/tmp/ofx_esp.sock"
+                + "\nlast error: " + (error == null ? "none" : error.split("\n")[0])
+                + "\nlast crash: " + (crash == null ? "none" : crash.split("\n")[0]));
+    }
+
+    private void showText(String title, String text) {
+        ScrollView scroll = new ScrollView(this);
+        TextView view = new TextView(this);
+        view.setText(text);
+        view.setTextIsSelectable(true);
+        view.setTextSize(11f);
+        view.setPadding(16, 8, 16, 8);
+        scroll.addView(view);
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setView(scroll)
+                .setPositiveButton("COPY", (d, which) -> {
+                    try {
+                        ClipboardManager cm =
+                                (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                        if (cm != null) cm.setPrimaryClip(ClipData.newPlainText("ofx-esp", text));
+                        Toast.makeText(this, "copied", Toast.LENGTH_SHORT).show();
+                    } catch (Throwable ignored) { }
+                })
+                .setNegativeButton("CLOSE", null)
+                .show();
     }
 
     private void startOverlay() {
