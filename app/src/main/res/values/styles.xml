@@ -1,0 +1,7 @@
+<resources>
+    <style name="AppTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:colorAccent">#FF3D5AFE</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+    <color name="ic_launcher_bg">#0B1B2B</color>
+</resources>
