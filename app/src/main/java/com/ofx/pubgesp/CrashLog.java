@@ -20,14 +20,34 @@ public final class CrashLog {
     private static final String PREFS = "ofx_crash";
     private static final String LAST_CRASH = "last_crash";
     private static final String LAST_ERROR = "last_error";
-    private static final int LIMIT = 6000;
+    private static final int LIMIT = 12000;
 
     private CrashLog() { }
 
     public static void recordCrash(Context c, Throwable t) {
         if (c == null || t == null) return;
-        write(c, LAST_CRASH, stackTrace(t));
+        String report = describe(t) + "\n" + stackTrace(t)
+                + "\n\n--- logcat ---\n" + captureLogcat();
+        writeNow(c, LAST_CRASH, report);
+        writeInternal(c, "crash.txt", report);
         Log.e("ofx-esp", "uncaught crash", t);
+    }
+
+    /** logcat survives native crashes that never reach a Java exception handler. */
+    public static String captureLogcat() {
+        try {
+            Process process = Runtime.getRuntime().exec(
+                    new String[]{"logcat", "-d", "-t", "300", "*:E"});
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            java.io.InputStream in = process.getInputStream();
+            byte[] buffer = new byte[4096];
+            int read;
+            while ((read = in.read(buffer)) > 0) out.write(buffer, 0, read);
+            process.destroy();
+            return trim(out.toString("UTF-8"));
+        } catch (Throwable ignored) {
+            return "";
+        }
     }
 
     public static void recordError(Context c, String message) {
@@ -39,7 +59,9 @@ public final class CrashLog {
     /** Persists a readable report outside prefs and posts it in the shade so it survives a crash loop. */
     public static void notifyCrash(Context c, Throwable t) {
         if (c == null) return;
-        String text = describe(t) + "\n" + stackTrace(t);
+        String text = describe(t) + "\n" + stackTrace(t)
+                + "\n\n--- logcat ---\n" + captureLogcat();
+        writeInternal(c, "crash.txt", text);
         try {
             File dir = c.getExternalFilesDir(null);
             if (dir != null) {
@@ -112,6 +134,26 @@ public final class CrashLog {
         try {
             c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
                     .putString(key, trim(value)).apply();
+        } catch (Throwable ignored) { }
+    }
+
+    /** commit() blocks until the data is on disk — apply() is lost when a crash kills the process. */
+    private static void writeNow(Context c, String key, String value) {
+        try {
+            c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                    .putString(key, trim(value)).commit();
+        } catch (Throwable ignored) { }
+    }
+
+    private static void writeInternal(Context c, String name, String value) {
+        try {
+            java.io.File file = new java.io.File(c.getFilesDir(), name);
+            java.io.FileWriter writer = new java.io.FileWriter(file, false);
+            try {
+                writer.write(trim(value));
+            } finally {
+                writer.close();
+            }
         } catch (Throwable ignored) { }
     }
 

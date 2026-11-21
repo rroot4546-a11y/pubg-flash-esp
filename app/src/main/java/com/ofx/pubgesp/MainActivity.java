@@ -40,6 +40,11 @@ public final class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setTitle("PUBG Flash ESP — ofx");
+        if (Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 7);
+        }
         try {
             buildUi();
         } catch (Throwable t) {
@@ -152,6 +157,14 @@ public final class MainActivity extends Activity {
         });
         root.addView(clearErrors);
 
+        Button logcat = new Button(this);
+        logcat.setText("DUMP LOGCAT");
+        logcat.setOnClickListener(v -> {
+            String log = CrashLog.captureLogcat();
+            showText("Logcat", log == null || log.isEmpty() ? "logcat unavailable" : log);
+        });
+        root.addView(logcat);
+
         ScrollView scroll = new ScrollView(this);
         scroll.addView(root, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -161,12 +174,6 @@ public final class MainActivity extends Activity {
         String startupCrash = CrashLog.lastCrash(this);
         if (startupCrash != null) {
             showText("App crashed — diagnostics", startupCrash);
-        }
-
-        if (Build.VERSION.SDK_INT >= 33
-                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
-                != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 7);
         }
     }
 
@@ -183,7 +190,8 @@ public final class MainActivity extends Activity {
         box.addView(heading);
 
         TextView body = new TextView(this);
-        body.setText(CrashLog.stackTrace(t));
+        body.setText(CrashLog.stackTrace(t) + "\n\n--- logcat ---\n"
+                + CrashLog.captureLogcat());
         body.setTextIsSelectable(true);
         body.setTextSize(11f);
         box.addView(body);
