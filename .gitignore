@@ -1,6 +1,7 @@
 .gradle/
 build/
 app/build/
+app-debug.apk
 local.properties
 .idea/
 *.iml

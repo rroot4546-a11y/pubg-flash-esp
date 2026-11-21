@@ -3,8 +3,10 @@ package com.ofx.pubgesp;
 import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.media.projection.MediaProjectionManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -21,6 +23,9 @@ import android.widget.Toast;
 
 /** Control panel: root/overlay checks, profile selection and overlay lifecycle. */
 public final class MainActivity extends Activity {
+    private static final int REQ_SCREEN_CAPTURE = 9001;
+
+    private Spinner engineSpinner;
     private EditText packageField;
     private EditText teamField;
     private Spinner profileSpinner;
@@ -43,6 +48,13 @@ public final class MainActivity extends Activity {
         status = new TextView(this);
         status.setTextSize(15f);
         root.addView(status);
+
+        root.addView(label("ESP engine"));
+        engineSpinner = new Spinner(this);
+        engineSpinner.setAdapter(new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_dropdown_item,
+                new String[]{"Vision ESP (no root)", "Memory ESP (root)"}));
+        root.addView(engineSpinner);
 
         root.addView(label("Target package"));
         packageField = new EditText(this);
@@ -89,9 +101,12 @@ public final class MainActivity extends Activity {
         Button stop = new Button(this);
         stop.setText("STOP");
         stop.setOnClickListener(v -> {
-            Intent i = new Intent(this, EspOverlayService.class);
-            i.setAction(EspOverlayService.ACTION_STOP);
-            startService(i);
+            Intent memory = new Intent(this, EspOverlayService.class);
+            memory.setAction(EspOverlayService.ACTION_STOP);
+            startService(memory);
+            Intent vision = new Intent(this, VisionOverlayService.class);
+            vision.setAction(VisionOverlayService.ACTION_STOP);
+            startService(vision);
             status.setText("stopped");
         });
         root.addView(stop);
@@ -125,6 +140,23 @@ public final class MainActivity extends Activity {
         updateStatus();
     }
 
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQ_SCREEN_CAPTURE) return;
+        if (resultCode != RESULT_OK || data == null) {
+            status.setText("screen capture consent denied");
+            return;
+        }
+        Intent service = new Intent(this, VisionOverlayService.class);
+        service.setAction(VisionOverlayService.ACTION_START);
+        service.putExtra(VisionOverlayService.EXTRA_RESULT_CODE, resultCode);
+        service.putExtra(VisionOverlayService.EXTRA_RESULT_DATA, data);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(service);
+        else startService(service);
+        status.setText("starting vision overlay — check the notification");
+    }
+
     private TextView label(String text) {
         TextView t = new TextView(this);
         t.setText(text);
@@ -144,21 +176,35 @@ public final class MainActivity extends Activity {
     private void updateStatus() {
         boolean root = RootHelperClient.rootAvailable();
         boolean overlay = android.provider.Settings.canDrawOverlays(this);
-        status.setText("root: " + (root ? "YES" : "NO")
+        String engine = engineSpinner != null && engineSpinner.getSelectedItemPosition() == 0
+                ? "vision (no root)" : "memory (root)";
+        status.setText("engine: " + engine
+                + "\nroot: " + (root ? "YES" : "NO")
                 + "\noverlay permission: " + (overlay ? "YES" : "NO")
-                + "\nhelper socket: /data/local/tmp/ofx_esp.sock");
+                + "\nvision: MediaProjection + on-device person detector"
+                + "\nmemory: /data/local/tmp/ofx_esp.sock");
     }
 
     private void startOverlay() {
-        if (!RootHelperClient.rootAvailable()) {
-            Toast.makeText(this, "root (Magisk su) required", Toast.LENGTH_LONG).show();
-            return;
-        }
         if (!android.provider.Settings.canDrawOverlays(this)) {
             Intent i = new Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                     Uri.parse("package:" + getPackageName()));
             startActivity(i);
             Toast.makeText(this, "grant overlay permission, then start again", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        if (engineSpinner.getSelectedItemPosition() == 0) {
+            MediaProjectionManager mpm =
+                    (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+            startActivityForResult(mpm.createScreenCaptureIntent(), REQ_SCREEN_CAPTURE);
+            status.setText("waiting for screen capture consent");
+            return;
+        }
+
+        if (!RootHelperClient.rootAvailable()) {
+            Toast.makeText(this,
+                    "memory mode needs root — pick Vision ESP (no root)", Toast.LENGTH_LONG).show();
             return;
         }
 

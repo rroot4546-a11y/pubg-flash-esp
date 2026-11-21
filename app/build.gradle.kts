@@ -10,8 +10,8 @@ android {
         applicationId = "com.ofx.pubgesp"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "2.0.0"
     }
 
     buildTypes {
@@ -31,4 +31,8 @@ android {
             excludes += setOf("META-INF/*")
         }
     }
+}
+
+dependencies {
+    implementation("com.google.mlkit:object-detection:17.0.2")
 }

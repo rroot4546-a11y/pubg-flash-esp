@@ -1,14 +1,23 @@
-# PUBG Flash ESP — external overlay APK
+# PUBG Flash ESP — overlay APK
 
-Root-only external ESP for **PUBG MOBILE FLASH** (`com.tencent.igfit`). The game process is never
-modified: a root helper reads `/proc/<pid>/mem`, resolves the UE4 world and actor array, and sends a
-packed frame to a normal Android overlay view.
+Two engines, one APK:
+
+1. **Vision ESP (no root)** — captures the game's own pixels with `MediaProjection`, runs the bundled
+   on-device ML Kit person detector, and draws boxes over detected players. No `su`, no `/proc`, no
+   game-memory reads.
+2. **Memory ESP (root)** — a root C helper reads `/proc/<pid>/mem`, resolves the UE4 world and actor
+   array, and sends a packed frame to the overlay. Read-only; the game process is never modified.
+
+Pick the engine in the app. Vision is the default and works on a stock, unrooted phone.
 
 ## What ships
 
+- `app/src/main/java/com/ofx/pubgesp/VisionOverlayService.java` — MediaProjection capture, ML Kit
+  on-device person detection, box projection and lifecycle.
+- `app/src/main/java/com/ofx/pubgesp/VisionOverlayView.java` — transparent full-screen box renderer.
 - `native/esphelper.c` — root-side C reader, AF_UNIX protocol, ELF base + GWorld + actor array walk.
 - `app/src/main/java/com/ofx/pubgesp/` — Java client, overlay renderer, profile/offset editor.
-- `.github/workflows/build.yml` — builds the helper with NDK, the APK with Gradle, uploads the artifact.
+- `.github/workflows/build.yml` — builds helper with NDK, APK with Gradle, uploads artifact and release.
 
 ## Build locally
 
@@ -20,12 +29,24 @@ export ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/25.2.9519653
 # APK: app/build/outputs/apk/debug/app-debug.apk
 ```
 
-GitHub Actions does the same on every push to `main`; grab the APK from the workflow artifact.
+GitHub Actions does the same on every push to `main`; grab the APK from the workflow artifact or
+the `v*` release.
 
-## Install and run
+## Install and run — no root
 
-1. Install on a rooted (Magisk) ARM64 device. `su` must grant the app root silently.
-2. Open the app → **START OVERLAY** → grant "display over other apps" when prompted.
+1. Install the APK on an ARM64 Android 7+ device.
+2. Open the app → leave **Vision ESP (no root)** selected.
+3. Grant "display over other apps" when prompted.
+4. Tap **START OVERLAY** → accept the Android screen-capture consent dialog.
+5. Start PUBG Flash. Red boxes track detected people in the game image.
+6. Lower-end phones can be slower; the capture is downscaled to a 720px long edge before detection.
+
+Nothing is written to the game. The detector sees the same pixels the player sees.
+
+## Install and run — root memory mode
+
+1. Device must be rooted with Magisk; `su` must grant the app root silently.
+2. Select **Memory ESP (root)**, grant overlay permission, tap **START OVERLAY**.
 3. Start PUBG Flash. The overlay draws boxes, names, health bars and distances over the game.
 4. Use **EDIT OFFSETS** if a game update shifts a pointer.
 
@@ -45,7 +66,7 @@ Actors       ULevel + 0xA0
 `0x168`. Player member offsets (health/team/name) live in `OffsetProfile.java` and are editable in
 the app; update them from a dumped SDK when the game version changes.
 
-## Protocol
+## Memory protocol
 
 One AF_UNIX socket at `/data/local/tmp/ofx_esp.sock`:
 
@@ -61,6 +82,6 @@ One AF_UNIX socket at `/data/local/tmp/ofx_esp.sock`:
 
 ## Notes
 
-- Requires ARM64 (helper is `aarch64-linux-android24`).
-- Reads only. Nothing is written into the game process.
-- Anticheat can still detect the overlay/root; use a test account.
+- Root memory helper is ARM64 (`aarch64-linux-android24`); vision mode is pure Java + ML Kit.
+- ML Kit bundles native pipelines for all ABIs, so the debug APK is ~48 MB.
+- Anticheat can still detect screen capture or overlays; use a test account.
