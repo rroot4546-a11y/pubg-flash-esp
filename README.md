@@ -54,6 +54,15 @@ v2.0.2 records every crash and engine error on the device:
 
 `last error` and `last crash` are also shown on the main status panel.
 
+## Hardware probe APK
+
+`probe/build/outputs/apk/debug/probe-debug.apk` installs side by side as **ESP Probe**
+(`com.ofx.pubgesp.probe`). It has no ML Kit, no custom Application and no services. Open it
+and run the numbered buttons: boot info, overlay permission, add/remove a test overlay, screen
+capture consent + `MediaProjection.createVirtualDisplay()`, and logcat dump. Each step prints its
+own result or full stack trace on screen. This isolates whether the A55 fails at boot, at overlay,
+or at capture before touching the main app.
+
 ## Install and run — root memory mode
 
 1. Device must be rooted with Magisk; `su` must grant the app root silently.

@@ -14,3 +14,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "PubgFlashEsp"
 include(":app")
+include(":probe")
