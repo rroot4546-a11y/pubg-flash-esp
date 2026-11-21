@@ -37,17 +37,36 @@ public final class MainActivity extends Activity {
     private TextView status;
 
     @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        setTitle("PUBG Flash ESP — ofx");
-        if (Build.VERSION.SDK_INT >= 33
-                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
-                != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 7);
-        }
+    protected void attachBaseContext(Context base) {
+        CrashLog.mark(base, "attachBaseContext start");
         try {
-            buildUi();
+            super.attachBaseContext(base);
+            CrashLog.mark(base, "attachBaseContext done");
         } catch (Throwable t) {
+            CrashLog.mark(base, "attach failed: " + CrashLog.stackTrace(t));
+            throw new RuntimeException(t);
+        }
+        CrashLog.installEarlyHandler(base);
+    }
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        try {
+            CrashLog.mark(this, "onCreate start");
+            super.onCreate(savedInstanceState);
+            CrashLog.mark(this, "super.onCreate done");
+            setTitle("PUBG Flash ESP — ofx");
+            CrashLog.mark(this, "title set");
+            if (Build.VERSION.SDK_INT >= 33
+                    && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                    != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 7);
+                CrashLog.mark(this, "notification permission requested");
+            }
+            buildUi();
+            CrashLog.mark(this, "buildUi done");
+        } catch (Throwable t) {
+            CrashLog.mark(this, "FATAL: " + CrashLog.stackTrace(t));
             CrashLog.recordCrash(this, t);
             CrashLog.notifyCrash(this, t);
             showFatalUi(t);
@@ -165,6 +184,11 @@ public final class MainActivity extends Activity {
         });
         root.addView(logcat);
 
+        Button boot = new Button(this);
+        boot.setText("VIEW BOOT LOG");
+        boot.setOnClickListener(v -> showText("Boot log", CrashLog.bootLog(this)));
+        root.addView(boot);
+
         ScrollView scroll = new ScrollView(this);
         scroll.addView(root, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -190,8 +214,9 @@ public final class MainActivity extends Activity {
         box.addView(heading);
 
         TextView body = new TextView(this);
-        body.setText(CrashLog.stackTrace(t) + "\n\n--- logcat ---\n"
-                + CrashLog.captureLogcat());
+        body.setText(CrashLog.stackTrace(t)
+                + "\n\n--- boot ---\n" + CrashLog.bootLog(this)
+                + "\n\n--- logcat ---\n" + CrashLog.captureLogcat());
         body.setTextIsSelectable(true);
         body.setTextSize(11f);
         box.addView(body);

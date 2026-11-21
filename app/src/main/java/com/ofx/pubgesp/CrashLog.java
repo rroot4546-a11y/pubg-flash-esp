@@ -24,6 +24,55 @@ public final class CrashLog {
 
     private CrashLog() { }
 
+    private static Thread.UncaughtExceptionHandler previous;
+
+    /** Installed from Activity.attachBaseContext so launch failures are recorded too. */
+    public static void installEarlyHandler(Context c) {
+        try {
+            final Thread.UncaughtExceptionHandler old =
+                    Thread.getDefaultUncaughtExceptionHandler();
+            previous = old;
+            Thread.setDefaultUncaughtExceptionHandler((thread, t) -> {
+                try {
+                    mark(c, "UNCAUGHT: " + stackTrace(t));
+                    recordCrash(c, t);
+                    notifyCrash(c, t);
+                } catch (Throwable ignored) { }
+                if (previous != null) previous.uncaughtException(thread, t);
+                else Runtime.getRuntime().exit(1);
+            });
+            mark(c, "early handler installed");
+        } catch (Throwable ignored) { }
+    }
+
+    /** Appends a boot-stage marker with a full flush so a crash loop leaves a trail. */
+    public static void mark(Context c, String stage) {
+        if (c == null) return;
+        try {
+            java.io.File file = new java.io.File(c.getFilesDir(), "boot.txt");
+            java.io.FileWriter writer = new java.io.FileWriter(file, true);
+            try {
+                writer.write(System.currentTimeMillis() + " " + stage + "\n");
+            } finally {
+                writer.close();
+            }
+        } catch (Throwable ignored) { }
+        Log.i("ofx-esp", "boot: " + stage);
+    }
+
+    public static String bootLog(Context c) {
+        if (c == null) return "no context";
+        StringBuilder sb = new StringBuilder();
+        try {
+            java.io.BufferedReader reader = new java.io.BufferedReader(
+                    new java.io.FileReader(new java.io.File(c.getFilesDir(), "boot.txt")));
+            String line;
+            while ((line = reader.readLine()) != null) sb.append(line).append('\n');
+            reader.close();
+        } catch (Throwable ignored) { }
+        return sb.length() == 0 ? "no boot markers" : trim(sb.toString());
+    }
+
     public static void recordCrash(Context c, Throwable t) {
         if (c == null || t == null) return;
         String report = describe(t) + "\n" + stackTrace(t)
