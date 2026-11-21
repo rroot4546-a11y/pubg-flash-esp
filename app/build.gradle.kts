@@ -10,8 +10,8 @@ android {
         applicationId = "com.ofx.pubgesp"
         minSdk = 24
         targetSdk = 34
-        versionCode = 13
-        versionName = "2.1.1"
+        versionCode = 14
+        versionName = "2.1.2"
     }
 
     buildTypes {

@@ -9,7 +9,7 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
-import android.graphics.ImageFormat;
+import android.graphics.Bitmap;
 import android.graphics.PixelFormat;
 import android.graphics.Point;
 import android.hardware.display.DisplayManager;
@@ -198,7 +198,9 @@ public final class VisionOverlayService extends Service {
             projection.registerCallback(projectionCallback, captureHandler);
         }
 
-        imageReader = ImageReader.newInstance(width, height, ImageFormat.YUV_420_888, 3);
+        // Samsung's Android 17 virtual display reports invalid YUV plane geometry;
+        // RGBA planes have a single flat buffer and survive getPlanes().
+        imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 3);
         imageReader.setOnImageAvailableListener(reader -> {
             Image image = reader.acquireNextImage();
             if (image == null) return;
@@ -206,27 +208,29 @@ public final class VisionOverlayService extends Service {
                 image.close();
                 return;
             }
-            byte[] nv21;
+            Bitmap bitmap;
             try {
-                nv21 = toNv21(image, captureWidth, captureHeight);
+                bitmap = toBitmap(image, captureWidth, captureHeight);
             } catch (Throwable t) {
                 CrashLog.recordError(this, "frame copy failed: " + CrashLog.describe(t));
-                image.close();
                 return;
             } finally {
                 image.close();
             }
             busy.set(true);
             try {
-                InputImage input = InputImage.fromByteArray(nv21, captureWidth,
-                        captureHeight, rotationDegrees, InputImage.IMAGE_FORMAT_NV21);
+                InputImage input = InputImage.fromBitmap(bitmap, rotationDegrees);
                 detector.process(input)
                         .addOnSuccessListener(this::publish)
                         .addOnFailureListener(e -> { })
-                        .addOnCompleteListener(task -> busy.set(false));
+                        .addOnCompleteListener(task -> {
+                            busy.set(false);
+                            bitmap.recycle();
+                        });
             } catch (Throwable t) {
                 CrashLog.recordError(this, "vision frame failed: " + CrashLog.describe(t));
                 busy.set(false);
+                bitmap.recycle();
             }
         }, captureHandler);
 
@@ -237,36 +241,27 @@ public final class VisionOverlayService extends Service {
     }
 
     /**
-     * Copies YUV_420_888 planes into a standalone NV21 frame. The Image is closed
-     * immediately after this call so no ML Kit task ever reads a recycled buffer.
+     * Copies the single RGBA plane into a Bitmap. The Image is closed by the caller
+     * immediately after this call so no ML Kit task reads a recycled buffer.
      */
-    private static byte[] toNv21(Image image, int width, int height) {
-        Image.Plane[] planes = image.getPlanes();
-        ByteBuffer y = planes[0].getBuffer();
-        ByteBuffer u = planes[1].getBuffer();
-        ByteBuffer v = planes[2].getBuffer();
-        byte[] out = new byte[width * height * 3 / 2];
-        int yRow = planes[0].getRowStride();
-        int yPixel = planes[0].getPixelStride();
+    private static Bitmap toBitmap(Image image, int width, int height) {
+        Image.Plane plane = image.getPlanes()[0];
+        ByteBuffer buffer = plane.getBuffer();
+        int[] pixels = new int[width * height];
+        int rowStride = plane.getRowStride();
         for (int row = 0; row < height; row++) {
-            y.position(row * yRow);
+            buffer.position(row * rowStride);
             for (int col = 0; col < width; col++) {
-                out[row * width + col] = y.get(col * yPixel);
+                int r = buffer.get() & 0xff;
+                int g = buffer.get() & 0xff;
+                int b = buffer.get() & 0xff;
+                buffer.get();
+                pixels[row * width + col] = 0xff000000 | (r << 16) | (g << 8) | b;
             }
         }
-        int chromaOffset = width * height;
-        int chromaWidth = width / 2;
-        int chromaHeight = height / 2;
-        for (int row = 0; row < chromaHeight; row++) {
-            u.position(row * planes[1].getRowStride());
-            v.position(row * planes[2].getRowStride());
-            for (int col = 0; col < chromaWidth; col++) {
-                int dst = chromaOffset + row * width + col * 2;
-                out[dst] = v.get(col * planes[2].getPixelStride());
-                out[dst + 1] = u.get(col * planes[1].getPixelStride());
-            }
-        }
-        return out;
+        Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+        bitmap.setPixels(pixels, 0, width, 0, 0, width, height);
+        return bitmap;
     }
 
     private void publish(List<DetectedObject> detected) {
