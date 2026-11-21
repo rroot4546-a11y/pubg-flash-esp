@@ -40,7 +40,16 @@ public final class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setTitle("PUBG Flash ESP — ofx");
+        try {
+            buildUi();
+        } catch (Throwable t) {
+            CrashLog.recordCrash(this, t);
+            CrashLog.notifyCrash(this, t);
+            showFatalUi(t);
+        }
+    }
 
+    private void buildUi() {
         OffsetProfile p = Settings.load(this);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -161,10 +170,47 @@ public final class MainActivity extends Activity {
         }
     }
 
+    /** Last-resort screen: always opens, even when the control panel itself throws. */
+    private void showFatalUi(Throwable t) {
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(24, 24, 24, 24);
+
+        TextView heading = new TextView(this);
+        heading.setText("Startup failed — diagnostics");
+        heading.setTextSize(18f);
+        box.addView(heading);
+
+        TextView body = new TextView(this);
+        body.setText(CrashLog.stackTrace(t));
+        body.setTextIsSelectable(true);
+        body.setTextSize(11f);
+        box.addView(body);
+
+        Button copy = new Button(this);
+        copy.setText("COPY ERROR");
+        copy.setOnClickListener(v -> {
+            try {
+                ClipboardManager cm =
+                        (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                if (cm != null) {
+                    cm.setPrimaryClip(ClipData.newPlainText(
+                            "ofx-esp", CrashLog.stackTrace(t)));
+                }
+                Toast.makeText(this, "copied", Toast.LENGTH_SHORT).show();
+            } catch (Throwable ignored) { }
+        });
+        box.addView(copy);
+
+        scroll.addView(box);
+        setContentView(scroll);
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
-        updateStatus();
+        if (status != null) updateStatus();
     }
 
     @Override
@@ -172,7 +218,7 @@ public final class MainActivity extends Activity {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode != REQ_SCREEN_CAPTURE) return;
         if (resultCode != RESULT_OK || data == null) {
-            status.setText("screen capture consent denied");
+            if (status != null) status.setText("screen capture consent denied");
             return;
         }
         Intent service = new Intent(this, VisionOverlayService.class);
@@ -181,7 +227,7 @@ public final class MainActivity extends Activity {
         service.putExtra(VisionOverlayService.EXTRA_RESULT_DATA, data);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(service);
         else startService(service);
-        status.setText("starting vision overlay — check the notification");
+        if (status != null) status.setText("starting vision overlay — check the notification");
     }
 
     private TextView label(String text) {
@@ -201,6 +247,7 @@ public final class MainActivity extends Activity {
     }
 
     private void updateStatus() {
+        if (status == null) return;
         boolean root = RootHelperClient.rootAvailable();
         boolean overlay = android.provider.Settings.canDrawOverlays(this);
         String engine = engineSpinner != null && engineSpinner.getSelectedItemPosition() == 0

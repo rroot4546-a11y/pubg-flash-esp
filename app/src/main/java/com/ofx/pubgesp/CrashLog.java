@@ -1,9 +1,17 @@
 package com.ofx.pubgesp;
 
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
+import android.os.Build;
 import android.util.Log;
 
+import java.io.File;
+import java.io.FileWriter;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 
@@ -26,6 +34,48 @@ public final class CrashLog {
         if (c == null || message == null) return;
         write(c, LAST_ERROR, message);
         Log.e("ofx-esp", message);
+    }
+
+    /** Persists a readable report outside prefs and posts it in the shade so it survives a crash loop. */
+    public static void notifyCrash(Context c, Throwable t) {
+        if (c == null) return;
+        String text = describe(t) + "\n" + stackTrace(t);
+        try {
+            File dir = c.getExternalFilesDir(null);
+            if (dir != null) {
+                File report = new File(dir, "crash.txt");
+                FileWriter writer = new FileWriter(report, false);
+                try {
+                    writer.write(text);
+                } finally {
+                    writer.close();
+                }
+            }
+        } catch (Throwable ignored) { }
+
+        try {
+            NotificationManager nm =
+                    (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm == null) return;
+            if (Build.VERSION.SDK_INT >= 26) {
+                NotificationChannel ch = new NotificationChannel(
+                        "crash", "Crash diagnostics", NotificationManager.IMPORTANCE_HIGH);
+                nm.createNotificationChannel(ch);
+            }
+            Intent open = new Intent(c, MainActivity.class);
+            PendingIntent pi = PendingIntent.getActivity(c, 42, open,
+                    PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+            Notification.Builder b = Build.VERSION.SDK_INT >= 26
+                    ? new Notification.Builder(c, "crash")
+                    : new Notification.Builder(c);
+            b.setSmallIcon(R.drawable.ic_stat_esp)
+                    .setContentTitle("PUBG Flash ESP crashed")
+                    .setContentText(describe(t))
+                    .setStyle(new Notification.BigTextStyle().bigText(text))
+                    .setContentIntent(pi)
+                    .setAutoCancel(true);
+            nm.notify(99, b.build());
+        } catch (Throwable ignored) { }
     }
 
     public static String lastCrash(Context c) {

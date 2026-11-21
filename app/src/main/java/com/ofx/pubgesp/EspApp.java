@@ -10,6 +10,7 @@ public final class EspApp extends Application {
         Thread.UncaughtExceptionHandler previous = Thread.getDefaultUncaughtExceptionHandler();
         Thread.setDefaultUncaughtExceptionHandler((thread, throwable) -> {
             CrashLog.recordCrash(getApplicationContext(), throwable);
+            CrashLog.notifyCrash(getApplicationContext(), throwable);
             if (previous != null) {
                 previous.uncaughtException(thread, throwable);
             } else {
