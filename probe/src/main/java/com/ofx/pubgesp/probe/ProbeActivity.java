@@ -35,11 +35,11 @@ import java.io.StringWriter;
 public final class ProbeActivity extends Activity {
     private static final int REQ_CAPTURE = 77;
 
+    public static volatile String CAPTURE_RESULT = "not run";
+
     private TextView log;
     private View probeOverlay;
-    private MediaProjection projection;
-    private VirtualDisplay virtualDisplay;
-    private ImageReader imageReader;
+    private final Handler handler = new Handler(Looper.getMainLooper());
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -159,11 +159,12 @@ public final class ProbeActivity extends Activity {
 
     private void requestCapture() {
         try {
-            Intent fgs = new Intent(this, ProbeFgs.class);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(fgs);
-            else startService(fgs);
-            line("mediaProjection FGS started");
-
+            if (Build.VERSION.SDK_INT >= 33
+                    && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                    != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 88);
+                line("notification permission requested — tap capture again after granting");
+            }
             MediaProjectionManager mpm =
                     (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
             startActivityForResult(mpm.createScreenCaptureIntent(), REQ_CAPTURE);
@@ -182,54 +183,23 @@ public final class ProbeActivity extends Activity {
             line("consent denied");
             return;
         }
-        try {
-            MediaProjectionManager mpm =
-                    (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
-            projection = mpm.getMediaProjection(resultCode, data);
-            line("getMediaProjection=" + (projection != null));
-            if (projection == null) return;
-
-            if (Build.VERSION.SDK_INT >= 29) {
-                projection.registerCallback(new MediaProjection.Callback() {
-                    @Override
-                    public void onStop() {
-                        line("projection onStop");
-                    }
-                }, new Handler(Looper.getMainLooper()));
-                line("registerCallback OK");
-            }
-
-            imageReader = ImageReader.newInstance(320, 180,
-                    android.graphics.ImageFormat.YUV_420_888, 2);
-            line("ImageReader OK");
-
-            virtualDisplay = projection.createVirtualDisplay("probe", 320, 180, 160,
-                    DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                    imageReader.getSurface(), null, new Handler(Looper.getMainLooper()));
-            line("createVirtualDisplay OK");
-            new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                releaseCapture();
-                line("capture release OK — ALL CAPTURE TESTS PASSED");
-            }, 1500);
-        } catch (Throwable t) {
-            failure("capture pipeline", t);
-            releaseCapture();
-        }
+        CAPTURE_RESULT = "handing consent to foreground service";
+        Intent service = new Intent(this, ProbeFgs.class);
+        service.putExtra("code", resultCode);
+        service.putExtra("data", data);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(service);
+        else startService(service);
+        line("capture handed to foreground service — waiting");
+        pollCapture();
     }
 
-    private void releaseCapture() {
-        try {
-            if (virtualDisplay != null) virtualDisplay.release();
-        } catch (Throwable ignored) { }
-        try {
-            if (imageReader != null) imageReader.close();
-        } catch (Throwable ignored) { }
-        try {
-            if (projection != null) projection.stop();
-        } catch (Throwable ignored) { }
-        virtualDisplay = null;
-        imageReader = null;
-        projection = null;
+    private void pollCapture() {
+        handler.postDelayed(() -> {
+            line("CAPTURE: " + CAPTURE_RESULT);
+            if (CAPTURE_RESULT.startsWith("ALL CAPTURE")
+                    || CAPTURE_RESULT.contains("FAILED")) return;
+            pollCapture();
+        }, 400);
     }
 
     private void dumpLogcat() {
@@ -251,7 +221,7 @@ public final class ProbeActivity extends Activity {
 
     @Override
     protected void onDestroy() {
-        releaseCapture();
+        handler.removeCallbacksAndMessages(null);
         removeOverlay();
         super.onDestroy();
     }
