@@ -303,7 +303,8 @@ public final class VisionOverlayService extends Service {
             for (DetectedObject.Label label : object.getLabels()) {
                 float confidence = label.getConfidence();
                 if (confidence > best) best = confidence;
-                if (label.getText().toLowerCase(Locale.US).contains("person")
+                String labelText = label.getText();
+                if (labelText != null && labelText.toLowerCase(Locale.US).contains("person")
                         && confidence >= 0.05f) {
                     person = true;
                 }
@@ -311,12 +312,15 @@ public final class VisionOverlayService extends Service {
             String tag = (person ? "P" : "?") + String.format(Locale.US, "%.2f", best);
             int color = person ? Color.rgb(255, 64, 64) : Color.rgb(255, 200, 0);
             android.graphics.Rect r = object.getBoundingBox();
+            if (r == null) continue;
+            Integer rawId = object.getTrackingId();
+            int trackingId = rawId != null ? rawId : -1;
             boxes.add(new VisionOverlayView.Box(
                     r.left / captureScale,
                     r.top / captureScale,
                     r.right / captureScale,
                     r.bottom / captureScale,
-                    object.getTrackingId(), color, tag));
+                    trackingId, color, tag));
         }
         ui.post(() -> {
             if (overlay != null) overlay.setBoxes(boxes);
