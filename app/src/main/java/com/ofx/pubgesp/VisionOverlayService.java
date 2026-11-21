@@ -115,6 +115,9 @@ public final class VisionOverlayService extends Service {
         running = true;
 
         try {
+            // The startup provider is removed from the manifest; initialise here instead.
+            com.google.mlkit.common.sdkinternal.MlKitContext.initializeIfNeeded(
+                    getApplicationContext());
             detector = ObjectDetection.getClient(new ObjectDetectorOptions.Builder()
                     .setDetectorMode(ObjectDetectorOptions.SINGLE_IMAGE_MODE)
                     .enableMultipleObjects()
@@ -127,7 +130,8 @@ public final class VisionOverlayService extends Service {
             startCapture();
             ui.post(this::addOverlay);
         } catch (Throwable t) {
-            String message = "vision engine failed: " + CrashLog.describe(t);
+            String message = "vision engine failed: " + CrashLog.describe(t)
+                    + " — tap VIEW ERRORS";
             CrashLog.recordError(this, message + "\n" + CrashLog.stackTrace(t));
             Toast.makeText(this, message, Toast.LENGTH_LONG).show();
             stopSelf();
