@@ -28,6 +28,7 @@ import android.view.Surface;
 import android.view.WindowManager;
 import android.widget.Toast;
 
+import com.google.firebase.components.ComponentRegistrar;
 import com.google.mlkit.vision.common.InputImage;
 import com.google.mlkit.vision.objects.DetectedObject;
 import com.google.mlkit.vision.objects.ObjectDetection;
@@ -35,6 +36,7 @@ import com.google.mlkit.vision.objects.ObjectDetector;
 import com.google.mlkit.vision.objects.defaults.ObjectDetectorOptions;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -115,19 +117,34 @@ public final class VisionOverlayService extends Service {
         running = true;
 
         try {
-            // The startup provider is removed from the manifest; initialise here instead.
-            com.google.mlkit.common.sdkinternal.MlKitContext.initializeIfNeeded(
-                    getApplicationContext());
+            // No startup provider and no manifest component discovery: register the
+            // exact set of registrars bundled with this dependency graph by hand.
+            CrashLog.mark(this, "mlkit: begin");
+            try {
+                com.google.mlkit.common.sdkinternal.MlKitContext.getInstance();
+            } catch (IllegalStateException notInitialised) {
+                List<ComponentRegistrar> registrars = Arrays.asList(
+                        new com.google.mlkit.common.internal.CommonComponentRegistrar(),
+                        new com.google.mlkit.vision.common.internal.VisionCommonRegistrar(),
+                        new com.google.mlkit.vision.vkp.VkpRegistrar(),
+                        new com.google.mlkit.vision.objects.defaults.internal.DefaultObjectsRegistrar());
+                com.google.mlkit.common.sdkinternal.MlKitContext.initialize(
+                        getApplicationContext(), registrars);
+            }
+            CrashLog.mark(this, "mlkit: context ready");
             detector = ObjectDetection.getClient(new ObjectDetectorOptions.Builder()
                     .setDetectorMode(ObjectDetectorOptions.SINGLE_IMAGE_MODE)
                     .enableMultipleObjects()
                     .enableClassification()
                     .build());
+            CrashLog.mark(this, "mlkit: detector ready");
             MediaProjectionManager mpm =
                     (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
             projection = mpm.getMediaProjection(resultCode, resultData);
             if (projection == null) throw new IllegalStateException("MediaProjection is null");
+            CrashLog.mark(this, "capture: projection ready");
             startCapture();
+            CrashLog.mark(this, "capture: started");
             ui.post(this::addOverlay);
         } catch (Throwable t) {
             String message = "vision engine failed: " + CrashLog.describe(t)
