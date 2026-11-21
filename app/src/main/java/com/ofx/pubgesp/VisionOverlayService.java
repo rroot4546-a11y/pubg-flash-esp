@@ -35,6 +35,7 @@ import com.google.mlkit.vision.objects.ObjectDetection;
 import com.google.mlkit.vision.objects.ObjectDetector;
 import com.google.mlkit.vision.objects.defaults.ObjectDetectorOptions;
 
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -68,6 +69,8 @@ public final class VisionOverlayService extends Service {
     private HandlerThread captureThread;
     private Handler captureHandler;
     private float captureScale = 1f;
+    private int captureWidth;
+    private int captureHeight;
     private int rotationDegrees;
     private volatile boolean running;
 
@@ -161,8 +164,10 @@ public final class VisionOverlayService extends Service {
         Point screen = new Point();
         display.getRealSize(screen);
         captureScale = Math.min(1f, (float) MAX_EDGE / (float) Math.max(screen.x, screen.y));
-        int width = Math.max(2, Math.round(screen.x * captureScale));
-        int height = Math.max(2, Math.round(screen.y * captureScale));
+        int width = Math.max(2, Math.round(screen.x * captureScale)) & ~1;
+        int height = Math.max(2, Math.round(screen.y * captureScale)) & ~1;
+        captureWidth = width;
+        captureHeight = height;
         int density = getResources().getDisplayMetrics().densityDpi;
 
         switch (display.getRotation()) {
@@ -193,27 +198,35 @@ public final class VisionOverlayService extends Service {
             projection.registerCallback(projectionCallback, captureHandler);
         }
 
-        imageReader = ImageReader.newInstance(width, height, ImageFormat.YUV_420_888, 2);
+        imageReader = ImageReader.newInstance(width, height, ImageFormat.YUV_420_888, 3);
         imageReader.setOnImageAvailableListener(reader -> {
-            Image image = reader.acquireLatestImage();
+            Image image = reader.acquireNextImage();
             if (image == null) return;
-            if (!busy.compareAndSet(false, true)) {
+            if (busy.get()) {
                 image.close();
                 return;
             }
+            byte[] nv21;
             try {
-                InputImage input = InputImage.fromMediaImage(image, rotationDegrees);
+                nv21 = toNv21(image, captureWidth, captureHeight);
+            } catch (Throwable t) {
+                CrashLog.recordError(this, "frame copy failed: " + CrashLog.describe(t));
+                image.close();
+                return;
+            } finally {
+                image.close();
+            }
+            busy.set(true);
+            try {
+                InputImage input = InputImage.fromByteArray(nv21, captureWidth,
+                        captureHeight, rotationDegrees, InputImage.IMAGE_FORMAT_NV21);
                 detector.process(input)
                         .addOnSuccessListener(this::publish)
                         .addOnFailureListener(e -> { })
-                        .addOnCompleteListener(task -> {
-                            busy.set(false);
-                            image.close();
-                        });
+                        .addOnCompleteListener(task -> busy.set(false));
             } catch (Throwable t) {
                 CrashLog.recordError(this, "vision frame failed: " + CrashLog.describe(t));
                 busy.set(false);
-                image.close();
             }
         }, captureHandler);
 
@@ -221,6 +234,39 @@ public final class VisionOverlayService extends Service {
                 width, height, density,
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
                 imageReader.getSurface(), null, captureHandler);
+    }
+
+    /**
+     * Copies YUV_420_888 planes into a standalone NV21 frame. The Image is closed
+     * immediately after this call so no ML Kit task ever reads a recycled buffer.
+     */
+    private static byte[] toNv21(Image image, int width, int height) {
+        Image.Plane[] planes = image.getPlanes();
+        ByteBuffer y = planes[0].getBuffer();
+        ByteBuffer u = planes[1].getBuffer();
+        ByteBuffer v = planes[2].getBuffer();
+        byte[] out = new byte[width * height * 3 / 2];
+        int yRow = planes[0].getRowStride();
+        int yPixel = planes[0].getPixelStride();
+        for (int row = 0; row < height; row++) {
+            y.position(row * yRow);
+            for (int col = 0; col < width; col++) {
+                out[row * width + col] = y.get(col * yPixel);
+            }
+        }
+        int chromaOffset = width * height;
+        int chromaWidth = width / 2;
+        int chromaHeight = height / 2;
+        for (int row = 0; row < chromaHeight; row++) {
+            u.position(row * planes[1].getRowStride());
+            v.position(row * planes[2].getRowStride());
+            for (int col = 0; col < chromaWidth; col++) {
+                int dst = chromaOffset + row * width + col * 2;
+                out[dst] = v.get(col * planes[2].getPixelStride());
+                out[dst + 1] = u.get(col * planes[1].getPixelStride());
+            }
+        }
+        return out;
     }
 
     private void publish(List<DetectedObject> detected) {
