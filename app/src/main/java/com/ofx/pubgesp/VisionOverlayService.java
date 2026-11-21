@@ -10,6 +10,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.graphics.Bitmap;
+import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.graphics.Point;
 import android.hardware.display.DisplayManager;
@@ -41,6 +42,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Rootless ESP engine. Captures the game's own framebuffer with MediaProjection,
@@ -58,6 +60,9 @@ public final class VisionOverlayService extends Service {
 
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final AtomicBoolean busy = new AtomicBoolean(false);
+    private final AtomicInteger frameCount = new AtomicInteger();
+    private final AtomicInteger detectCount = new AtomicInteger();
+    private final AtomicInteger failCount = new AtomicInteger();
 
     private WindowManager windowManager;
     private VisionOverlayView overlay;
@@ -218,17 +223,27 @@ public final class VisionOverlayService extends Service {
                 image.close();
             }
             busy.set(true);
+            frameCount.incrementAndGet();
+            updateStatus();
             try {
                 InputImage input = InputImage.fromBitmap(bitmap, rotationDegrees);
                 detector.process(input)
                         .addOnSuccessListener(this::publish)
-                        .addOnFailureListener(e -> { })
+                        .addOnFailureListener(e -> {
+                            if (failCount.incrementAndGet() <= 3) {
+                                CrashLog.recordError(this, "detect failed: "
+                                        + CrashLog.describe(e) + "\n" + CrashLog.stackTrace(e));
+                            }
+                            updateStatus();
+                        })
                         .addOnCompleteListener(task -> {
                             busy.set(false);
                             bitmap.recycle();
                         });
             } catch (Throwable t) {
                 CrashLog.recordError(this, "vision frame failed: " + CrashLog.describe(t));
+                failCount.incrementAndGet();
+                updateStatus();
                 busy.set(false);
                 bitmap.recycle();
             }
@@ -264,27 +279,44 @@ public final class VisionOverlayService extends Service {
         return bitmap;
     }
 
+    private void updateStatus() {
+        int frames = frameCount.get();
+        int found = detectCount.get();
+        int failed = failCount.get();
+        ui.post(() -> {
+            if (overlay != null) {
+                overlay.setStatus("F" + frames + " D" + found
+                        + (failed > 0 ? " E" + failed : ""));
+            }
+        });
+    }
+
     private void publish(List<DetectedObject> detected) {
         if (!running || detected == null) return;
+        detectCount.addAndGet(detected.size());
+        updateStatus();
         List<VisionOverlayView.Box> boxes = new ArrayList<>();
         for (DetectedObject object : detected) {
             if (object == null) continue;
             boolean person = false;
+            float best = 0f;
             for (DetectedObject.Label label : object.getLabels()) {
+                float confidence = label.getConfidence();
+                if (confidence > best) best = confidence;
                 if (label.getText().toLowerCase(Locale.US).contains("person")
-                        && label.getConfidence() >= 0.25f) {
+                        && confidence >= 0.05f) {
                     person = true;
-                    break;
                 }
             }
-            if (!person) continue;
+            String tag = (person ? "P" : "?") + String.format(Locale.US, "%.2f", best);
+            int color = person ? Color.rgb(255, 64, 64) : Color.rgb(255, 200, 0);
             android.graphics.Rect r = object.getBoundingBox();
             boxes.add(new VisionOverlayView.Box(
                     r.left / captureScale,
                     r.top / captureScale,
                     r.right / captureScale,
                     r.bottom / captureScale,
-                    object.getTrackingId()));
+                    object.getTrackingId(), color, tag));
         }
         ui.post(() -> {
             if (overlay != null) overlay.setBoxes(boxes);

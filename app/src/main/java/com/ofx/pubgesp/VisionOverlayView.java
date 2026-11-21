@@ -18,17 +18,23 @@ public final class VisionOverlayView extends View {
         public final float right;
         public final float bottom;
         public final int id;
+        public final int color;
+        public final String tag;
 
-        public Box(float left, float top, float right, float bottom, int id) {
+        public Box(float left, float top, float right, float bottom, int id,
+                   int color, String tag) {
             this.left = left;
             this.top = top;
             this.right = right;
             this.bottom = bottom;
             this.id = id;
+            this.color = color;
+            this.tag = tag;
         }
     }
 
     private volatile List<Box> boxes;
+    private volatile String status = "";
     private final Paint stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint labelBg = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint label = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -50,9 +56,22 @@ public final class VisionOverlayView extends View {
         postInvalidate();
     }
 
+    public void setStatus(String text) {
+        status = text == null ? "" : text;
+        postInvalidate();
+    }
+
     @Override
     protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
+        String line = status;
+        if (!line.isEmpty()) {
+            float size = Math.max(16f, getHeight() / 48f);
+            label.setTextSize(size);
+            float tw = label.measureText(line);
+            canvas.drawRect(4f, 4f, tw + 18f, size + 14f, labelBg);
+            canvas.drawText(line, 10f, size + 8f, label);
+        }
         List<Box> current = boxes;
         if (current == null || current.isEmpty()) return;
         float w = getWidth();
@@ -69,8 +88,9 @@ public final class VisionOverlayView extends View {
             float right = Math.max(0f, Math.min(w, b.right));
             float bottom = Math.max(0f, Math.min(h, b.bottom));
             if (right - left < 8f || bottom - top < 12f) continue;
+            stroke.setColor(b.color);
             canvas.drawRect(left, top, right, bottom, stroke);
-            String text = "P" + (b.id >= 0 ? b.id : index);
+            String text = b.tag != null ? b.tag : "P" + (b.id >= 0 ? b.id : index);
             float tw = label.measureText(text);
             canvas.drawRect(left, Math.max(0f, top - 24f), left + tw + 10f, top, labelBg);
             canvas.drawText(text, left + 5f, Math.max(16f, top - 5f), label);
