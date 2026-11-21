@@ -59,6 +59,7 @@ public final class VisionOverlayService extends Service {
     private WindowManager windowManager;
     private VisionOverlayView overlay;
     private MediaProjection projection;
+    private MediaProjection.Callback projectionCallback;
     private VirtualDisplay virtualDisplay;
     private ImageReader imageReader;
     private ObjectDetector detector;
@@ -136,6 +137,23 @@ public final class VisionOverlayService extends Service {
         captureThread = new HandlerThread("vision-capture");
         captureThread.start();
         captureHandler = new Handler(captureThread.getLooper());
+
+        // Android 14+ rejects createVirtualDisplay() unless a callback is registered first.
+        // Registering it everywhere also gives us a reliable stop signal from the system.
+        if (Build.VERSION.SDK_INT >= 29 && projection != null) {
+            projectionCallback = new MediaProjection.Callback() {
+                @Override
+                public void onStop() {
+                    ui.post(() -> {
+                        if (!running) return;
+                        Toast.makeText(VisionOverlayService.this,
+                                "screen capture stopped", Toast.LENGTH_SHORT).show();
+                        stopSelf();
+                    });
+                }
+            };
+            projection.registerCallback(projectionCallback, captureHandler);
+        }
 
         imageReader = ImageReader.newInstance(width, height, ImageFormat.YUV_420_888, 2);
         imageReader.setOnImageAvailableListener(reader -> {
@@ -255,6 +273,12 @@ public final class VisionOverlayService extends Service {
             imageReader = null;
         }
         if (projection != null) {
+            if (projectionCallback != null && Build.VERSION.SDK_INT >= 29) {
+                try {
+                    projection.unregisterCallback(projectionCallback);
+                } catch (RuntimeException ignored) { }
+            }
+            projectionCallback = null;
             try {
                 projection.stop();
             } catch (IllegalStateException ignored) { }
